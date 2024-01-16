@@ -60,29 +60,34 @@ def decode_one_token(model: Transformer, x: torch.Tensor, input_pos: torch.Tenso
     global args
     if not args.eager_graph:
         logits = model(x, input_pos)
-        return sample(logits, **sampling_kwargs)        
+        idx_next, probs = sample(logits, **sampling_kwargs)      
+        return idx_next, probs  
         
     global captured
     global g_logits
     global g
     global g_x
     global g_inputpos
+    global g_idx_next
+    global g_probs
     if not captured:
         captured = True
         g = torch.cuda.CUDAGraph()
         # warm up
         logits = model(x, input_pos)
+        idx_next, probs = sample(logits, **sampling_kwargs)
         g_x = x
         g_inputpos = input_pos
         # record
         with torch.cuda.graph(g):
             g_logits = model(x, input_pos)
-        return sample(logits, **sampling_kwargs)    
+            g_idx_next, g_probs = sample(g_logits, **sampling_kwargs) 
+        return idx_next, probs    
        
     g_x.copy_(x)
     g_inputpos.copy_(input_pos)
     g.replay()
-    return sample(g_logits, **sampling_kwargs)
+    return g_idx_next, g_probs
 
 def decode_n_tokens(model: Transformer, cur_token: torch.Tensor, input_pos: torch.Tensor, num_new_tokens: int, callback=lambda _: _, **sampling_kwargs):
     new_tokens, new_probs = [], []
