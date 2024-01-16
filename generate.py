@@ -64,7 +64,6 @@ def decode_one_token(model: Transformer, x: torch.Tensor, input_pos: torch.Tenso
         return idx_next, probs  
         
     global captured
-    global g_logits
     global g
     global g_x
     global g_inputpos
@@ -80,12 +79,14 @@ def decode_one_token(model: Transformer, x: torch.Tensor, input_pos: torch.Tenso
         g_inputpos = input_pos
         # record
         with torch.cuda.graph(g):
-            g_logits = model(x, input_pos)
-            g_idx_next, g_probs = sample(g_logits, **sampling_kwargs) 
+            logits = model(x, input_pos)
+            g_idx_next, g_probs = sample(logits, **sampling_kwargs) 
         return idx_next, probs    
-       
-    g_x.copy_(x)
-    g_inputpos.copy_(input_pos)
+    
+    if g_x.data_ptr() != x.data_ptr():   
+        g_x.copy_(x)
+    if g_inputpos.data_ptr() != input_pos.data_ptr():
+        g_inputpos.copy_(input_pos)
     g.replay()
     return g_idx_next, g_probs
 
