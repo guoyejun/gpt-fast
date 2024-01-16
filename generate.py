@@ -52,11 +52,37 @@ def prefill(model: Transformer, x: torch.Tensor, input_pos: torch.Tensor, **samp
     logits = model(x, input_pos)
     return sample(logits, **sampling_kwargs)[0]
 
+captured = False
 def decode_one_token(model: Transformer, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
     # input_pos: [B, 1]
     assert input_pos.shape[-1] == 1
-    logits = model(x, input_pos)
-    return sample(logits, **sampling_kwargs)
+    
+    global args
+    if not args.eager_graph:
+        logits = model(x, input_pos)
+        return sample(logits, **sampling_kwargs)        
+        
+    global captured
+    global g_logits
+    global g
+    global g_x
+    global g_inputpos
+    if not captured:
+        captured = True
+        g = torch.cuda.CUDAGraph()
+        # warm up
+        logits = model(x, input_pos)
+        g_x = x
+        g_inputpos = input_pos
+        # record
+        with torch.cuda.graph(g):
+            g_logits = model(x, input_pos)
+        return sample(logits, **sampling_kwargs)    
+       
+    g_x.copy_(x)
+    g_inputpos.copy_(input_pos)
+    g.replay()
+    return sample(g_logits, **sampling_kwargs)
 
 def decode_n_tokens(model: Transformer, cur_token: torch.Tensor, input_pos: torch.Tensor, num_new_tokens: int, callback=lambda _: _, **sampling_kwargs):
     new_tokens, new_probs = [], []
@@ -401,7 +427,9 @@ if __name__ == '__main__':
     parser.add_argument('--profile', type=Path, default=None, help='Profile path.')
     parser.add_argument('--speculate_k', type=int, default=5, help='Speculative execution depth.')
     parser.add_argument('--draft_checkpoint_path', type=Path, default=None, help='Draft checkpoint path.')
+    parser.add_argument('--eager_graph', action='store_true', help='Whether to catpure the model into graph in eager mode.')
 
+    global args
     args = parser.parse_args()
     main(
         args.prompt, args.interactive, args.num_samples, args.max_new_tokens, args.top_k,
