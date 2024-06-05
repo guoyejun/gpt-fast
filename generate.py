@@ -353,8 +353,11 @@ def main(
             global model_forward, logits_to_prob
             model_forward = torch.compile(model_forward, mode="reduce-overhead", fullgraph=True)
 
-        global decode_one_token, prefill
-        decode_one_token = torch.compile(decode_one_token, mode="reduce-overhead", fullgraph=True)
+        global decode_one_token, prefill, args
+        if args.compile_nocudagraph:
+            decode_one_token = torch.compile(decode_one_token, options={"triton.cudagraphs": False}, fullgraph=True)
+        else:
+            decode_one_token = torch.compile(decode_one_token, mode="reduce-overhead", fullgraph=True)
 
         # Uncomment to squeeze more perf out of prefill
         if compile_prefill:
@@ -464,6 +467,7 @@ if __name__ == '__main__':
     parser.add_argument('--draft_checkpoint_path', type=Path, default=None, help='Draft checkpoint path.')
     parser.add_argument('--device', type=str, default=default_device, help='Device to use')
     parser.add_argument('--eager_cudagraph', action='store_true', help='Whether to catpure the model into cuda graph in eager mode.')
+    parser.add_argument('--compile_nocudagraph', action='store_true', help='Whether to enable cuda graph in torch.compile mode.')
 
     global args
     args = parser.parse_args()
