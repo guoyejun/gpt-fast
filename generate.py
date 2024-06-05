@@ -332,7 +332,7 @@ def main(
         'tokens_per_sec': [],
         'accept_counts': [],
     }
-    start = -1 if compile else 0
+    start = -1
 
     for i in range(start, num_samples):
         device_sync(device=device) # MKG
@@ -379,9 +379,8 @@ def main(
                 top_k=top_k,
             )
             aggregate_metrics['accept_counts'].append(metrics['accept_counts'])
-        if i == -1:
+        if i == -1 and compile:
             print(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
-            continue
         if hasattr(prof, "export_chrome_trace"):
             if use_tp:
                 prof.export_chrome_trace(f"{profile}_rank_{rank}.json")
@@ -396,9 +395,13 @@ def main(
             print()
         tokens_generated = y.size(0) - prompt_length
         tokens_sec = tokens_generated / t
-        aggregate_metrics['tokens_per_sec'].append(tokens_sec)
         print(f"Time for inference {i + 1}: {t:.02f} sec total, {tokens_sec:.02f} tokens/sec")
         print(f"Bandwidth achieved: {model_size * tokens_sec / 1e9:.02f} GB/s")
+        if i == -1:
+            print("exclude this run from the final result tokens/sec\n")
+            continue
+        aggregate_metrics['tokens_per_sec'].append(tokens_sec)
+        print("\n")
     print("==========")
     if is_speculative:
         counts_aggregated = [sum(i) for i in zip(*aggregate_metrics['accept_counts'])]
