@@ -59,11 +59,44 @@ def prefill(model: Transformer, x: torch.Tensor, input_pos: torch.Tensor, **samp
     logits = model(x, input_pos)
     return sample(logits, **sampling_kwargs)[0]
 
+captured = False
 def decode_one_token(model: Transformer, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs) -> Tuple[torch.Tensor, torch.Tensor]:
     # input_pos: [B, 1]
     assert input_pos.shape[-1] == 1
-    logits = model(x, input_pos)
-    return sample(logits, **sampling_kwargs)
+
+    global args
+    if not args.eager_cudagraph or args.compile:
+        logits = model(x, input_pos)
+        idx_next, probs = sample(logits, **sampling_kwargs)
+        return idx_next, probs
+
+    global captured
+    global g
+    global g_x
+    global g_inputpos
+    global g_idx_next
+    global g_probs
+    if not captured:
+        captured = True
+        g = torch.cuda.CUDAGraph()
+        # warm up
+        logits = model(x, input_pos)
+        idx_next, probs = sample(logits, **sampling_kwargs)
+        # record
+        g_x = x
+        g_inputpos = input_pos
+        with torch.cuda.graph(g):
+            logits = model(x, input_pos)
+            g_idx_next, g_probs = sample(logits, **sampling_kwargs)
+        return idx_next, probs
+
+    if g_x.data_ptr() != x.data_ptr():
+        g_x.copy_(x)
+    if g_inputpos.data_ptr() != input_pos.data_ptr():
+        g_inputpos.copy_(input_pos)
+    g.replay()
+    return g_idx_next, g_probs
+
 
 def decode_n_tokens(model: Transformer, cur_token: torch.Tensor, input_pos: torch.Tensor, num_new_tokens: int, callback=lambda _: _, **sampling_kwargs):
     new_tokens, new_probs = [], []
@@ -430,7 +463,9 @@ if __name__ == '__main__':
     parser.add_argument('--speculate_k', type=int, default=5, help='Speculative execution depth.')
     parser.add_argument('--draft_checkpoint_path', type=Path, default=None, help='Draft checkpoint path.')
     parser.add_argument('--device', type=str, default=default_device, help='Device to use')
+    parser.add_argument('--eager_cudagraph', action='store_true', help='Whether to catpure the model into cuda graph in eager mode.')
 
+    global args
     args = parser.parse_args()
     main(
         args.prompt, args.interactive, args.num_samples, args.max_new_tokens, args.top_k,
