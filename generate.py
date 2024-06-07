@@ -101,7 +101,8 @@ def decode_one_token(model: Transformer, x: torch.Tensor, input_pos: torch.Tenso
 def decode_n_tokens(model: Transformer, cur_token: torch.Tensor, input_pos: torch.Tensor, num_new_tokens: int, callback=lambda _: _, **sampling_kwargs):
     new_tokens, new_probs = [], []
     for i in range(num_new_tokens):
-        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True): # Actually better for Inductor to codegen attention here
+        with torch.profiler.record_function(f"newtoken_{i}"):
+          with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True): # Actually better for Inductor to codegen attention here
             next_token, next_prob = decode_one_token(
                 model, cur_token, input_pos, **sampling_kwargs
             )
@@ -205,7 +206,8 @@ def generate(
     seq = empty
     input_pos = torch.arange(0, T, device=device)
 
-    next_token = prefill(model, prompt.view(1, -1), input_pos, **sampling_kwargs).clone()
+    with torch.profiler.record_function("prefill"):
+        next_token = prefill(model, prompt.view(1, -1), input_pos, **sampling_kwargs).clone()
     if is_speculative:
         prefill(draft_model, prompt.view(1, -1), input_pos, **sampling_kwargs)
     seq[T] = next_token
@@ -403,7 +405,8 @@ def main(
             torch.profiler._utils._init_for_cuda_graphs()
             prof = torch.profiler.profile()
         with prof:
-            y, metrics = generate(
+            with torch.profiler.record_function("whole_profiling"):
+              y, metrics = generate(
                 model,
                 encoded,
                 max_new_tokens,
@@ -413,7 +416,7 @@ def main(
                 callback=callback,
                 temperature=temperature,
                 top_k=top_k,
-            )
+              )
             aggregate_metrics['accept_counts'].append(metrics['accept_counts'])
         if i == -1 and compile:
             print(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
