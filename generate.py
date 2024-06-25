@@ -399,7 +399,7 @@ def main(
             callback = lambda x : x
         t0 = time.perf_counter()
         import contextlib
-        if (i != num_samples - 1 or not profile) or (use_tp and rank != 0):
+        if (i != num_samples - 1 or not profile):
             prof = contextlib.nullcontext()
         else:
             torch.profiler._utils._init_for_cuda_graphs()
